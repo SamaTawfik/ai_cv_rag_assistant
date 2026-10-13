@@ -29,8 +29,13 @@ def get_vector_store() -> Chroma:
     )
 
 
+def calculate_file_hash(path: Path) -> str:
+    """Return a SHA-256 fingerprint of the file contents."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def ingest_pdf(pdf_path: str | Path) -> dict:
-    """Load a PDF, split its text, and save its chunks in Chroma."""
+    """Load, split, embed, and persist a PDF unless unchanged."""
     path = Path(pdf_path).resolve()
 
     if not path.is_file():
@@ -38,6 +43,33 @@ def ingest_pdf(pdf_path: str | Path) -> dict:
 
     if path.suffix.lower() != ".pdf":
         raise ValueError("Only PDF files are supported.")
+
+    file_hash = calculate_file_hash(path)
+    vector_store = get_vector_store()
+
+    existing = vector_store.get(
+        where={"source": str(path)},
+        include=["metadatas"],
+    )
+
+    existing_ids = existing["ids"]
+    existing_metadata = existing.get("metadatas") or []
+
+    # Skip embedding work if this exact file was already indexed.
+    if (
+        existing_ids
+        and existing_metadata
+        and all(
+            metadata and metadata.get("file_hash") == file_hash
+            for metadata in existing_metadata
+        )
+    ):
+        return {
+            "file_name": path.name,
+            "pages_loaded": 0,
+            "chunks_stored": len(existing_ids),
+            "status": "skipped_unchanged",
+        }
 
     loader = PyPDFLoader(str(path))
     documents = loader.load()
@@ -53,34 +85,36 @@ def ingest_pdf(pdf_path: str | Path) -> dict:
 
     chunks = splitter.split_documents(documents)
 
-    if not chunks or not any(chunk.page_content.strip() for chunk in chunks):
+    if not chunks or not any(
+        chunk.page_content.strip() for chunk in chunks
+    ):
         raise ValueError(
             f"No extractable text found in {path.name}. "
             "The PDF may be scanned or image-based."
         )
 
-    # Preserve source information and convert page numbers to 1-based numbering.
     for chunk in chunks:
         raw_page = chunk.metadata.get("page")
+
         chunk.metadata["file_name"] = path.name
         chunk.metadata["source"] = str(path)
+        chunk.metadata["file_hash"] = file_hash
+
         if raw_page is not None:
             chunk.metadata["page_number"] = int(raw_page) + 1
 
-    vector_store = get_vector_store()
-
-    # Re-index this exact file instead of leaving stale chunks behind.
+    # Remove stale chunks only after the replacement chunks are prepared.
     vector_store.delete(where={"source": str(path)})
 
-    # Stable IDs prevent duplicate chunks when the same file is re-indexed.
     chunk_ids = []
-    for chunk in chunks:
+
+    for index, chunk in enumerate(chunks):
         identity = (
-            f"{path}|"
-            f"{chunk.metadata.get('page_number', '')}|"
-            f"{chunk.page_content}"
+            f"{path}|{file_hash}|{index}|{chunk.page_content}"
         )
-        chunk_ids.append(hashlib.sha256(identity.encode("utf-8")).hexdigest())
+        chunk_ids.append(
+            hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        )
 
     vector_store.add_documents(
         documents=chunks,
@@ -95,17 +129,20 @@ def ingest_pdf(pdf_path: str | Path) -> dict:
     }
 
 
-def ingest_directory(directory: str | Path | None = None) -> list[dict]:
-    """Index all PDFs in a directory, skipping the uploads subdirectory."""
+def ingest_directory(
+    directory: str | Path | None = None,
+) -> list[dict]:
+    """Index top-level PDF files in the configured data directory."""
     root = Path(directory) if directory else settings.data_dir
-    upload_root = settings.upload_dir.resolve()
+
+    if not root.is_dir():
+        raise FileNotFoundError(
+            f"Data directory not found: {root}"
+        )
 
     results = []
 
     for pdf_path in sorted(root.glob("*.pdf")):
-        if pdf_path.resolve().is_relative_to(upload_root):
-            continue
-
         results.append(ingest_pdf(pdf_path))
 
     return results
