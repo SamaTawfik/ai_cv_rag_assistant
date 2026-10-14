@@ -14,7 +14,10 @@ from app.schemas import (
 from app.services import answer_question
 from app.ingestion import get_embeddings
 from app.schemas import EmbeddingRequest, EmbeddingResponse
-
+from pathlib import Path
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="AI and Computer Vision RAG Assistant",
@@ -25,6 +28,17 @@ app = FastAPI(
 )
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health", response_model=HealthResponse)
