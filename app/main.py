@@ -1,3 +1,4 @@
+import hashlib
 
 from pathlib import Path
 
@@ -85,7 +86,6 @@ def upload_pdf(file: UploadFile = File(...)):
             detail="The uploaded file exceeds the 20 MB limit.",
         )
 
-    # Check for a PDF header within the first 1024 bytes.
     if b"%PDF-" not in content[:1024]:
         raise HTTPException(
             status_code=400,
@@ -93,7 +93,36 @@ def upload_pdf(file: UploadFile = File(...)):
         )
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    print("UPLOAD DIR:", settings.upload_dir.resolve())
+    print("FILES:", list(settings.upload_dir.rglob("*.pdf")))
+    print("NEW HASH:", hashlib.sha256(content).hexdigest())
+
+    # Detect duplicate files by content, not filename.
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    for existing_file in settings.upload_dir.rglob("*.pdf"):
+        try:
+            existing_hash = hashlib.sha256(
+                existing_file.read_bytes()
+            ).hexdigest()
+
+            if existing_hash == file_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This PDF has already been uploaded.",
+                )
+        except OSError:
+            continue
+
     destination = settings.upload_dir / safe_name
+
+    # Avoid overwriting a different PDF with the same filename.
+    if destination.exists():
+        destination = (
+            settings.upload_dir
+            / f"{Path(safe_name).stem}_{file_hash[:12]}.pdf"
+        )
+
     destination.write_bytes(content)
 
     try:
