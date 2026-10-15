@@ -145,4 +145,4 @@ def ingest_directory(
     for pdf_path in sorted(root.glob("*.pdf")):
         results.append(ingest_pdf(pdf_path))
 
-    return results
+    return 

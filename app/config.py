@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     upload_dir: Path = PROJECT_ROOT / "data" / "uploads"
     chroma_dir: Path = PROJECT_ROOT / "chroma_db"
 
-    chunk_size: int = 800
+    chunk_size: int = 1000
     chunk_overlap: int = 120
     retrieval_k: int = 4
+
 
 
 settings = Settings()

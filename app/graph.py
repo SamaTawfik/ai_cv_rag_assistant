@@ -10,7 +10,7 @@ from app.config import settings
 from app.retrieval import retrieve_documents
 
 
-MIN_RELEVANCE_SCORE = 0.25
+MIN_RELEVANCE_SCORE = 0.45
 
 
 class RAGState(TypedDict, total=False):
